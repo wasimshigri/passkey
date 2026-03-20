@@ -1,0 +1,10 @@
+{
+  "buildCommand": "npm install",
+  "framework": "express",
+  "outputDirectory": ".",
+  "env": {
+    "JWT_SECRET": "@jwt_secret",
+    "RP_ID": "@rp_id",
+    "ORIGIN": "@origin"
+  }
+}
