@@ -1,4 +1,3 @@
-import { kv } from '@vercel/kv';
 import fs from 'fs/promises';
 import path from 'path';
 import { env } from '../config/env.js';
@@ -9,6 +8,21 @@ const dbPath = path.resolve(process.cwd(), env.dataFile);
 
 // Check if we're in Vercel environment
 const isVercel = !!process.env.VERCEL;
+
+// Lazy load KV only when needed
+let kv = null;
+async function getKV() {
+  if (!kv && isVercel) {
+    try {
+      const { kv: kvInstance } = await import('@vercel/kv');
+      kv = kvInstance;
+    } catch (error) {
+      console.error('Failed to load Vercel KV:', error);
+      throw error;
+    }
+  }
+  return kv;
+}
 
 async function ensureDbFile() {
   const dir = path.dirname(dbPath);
@@ -24,12 +38,15 @@ async function ensureDbFile() {
 export async function readDb() {
   if (isVercel) {
     try {
-      const data = await kv.get(DB_KEY);
-      return data || initialDb;
+      const kvInstance = await getKV();
+      if (kvInstance) {
+        const data = await kvInstance.get(DB_KEY);
+        return data || initialDb;
+      }
     } catch (error) {
       console.error('KV read error:', error);
-      return initialDb;
     }
+    return initialDb;
   } else {
     // Local development: use file system
     await ensureDbFile();
@@ -41,7 +58,10 @@ export async function readDb() {
 export async function writeDb(data) {
   if (isVercel) {
     try {
-      await kv.set(DB_KEY, data);
+      const kvInstance = await getKV();
+      if (kvInstance) {
+        await kvInstance.set(DB_KEY, data);
+      }
     } catch (error) {
       console.error('KV write error:', error);
       throw error;
