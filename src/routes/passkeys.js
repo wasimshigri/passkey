@@ -13,6 +13,7 @@ import { fromBase64Url, toBase64Url } from '../utils/encoding.js';
 import { signToken } from '../utils/token.js';
 
 const router = Router();
+const textEncoder = new TextEncoder();
 
 function createChallengeRecord({ userId = null, username = null, type, challenge }) {
   return {
@@ -52,7 +53,7 @@ router.post('/register/options', requireAuth, async (req, res) => {
     rpName: env.rpName,
     rpID: env.rpID,
     userName: req.user.username,
-    userID: req.user.id,
+    userID: textEncoder.encode(req.user.id),
     attestationType: 'none',
     authenticatorSelection: {
       residentKey: 'preferred',
@@ -185,6 +186,25 @@ router.post('/auth/options', async (req, res) => {
     challengeId: challengeRecord.id,
     options,
   });
+});
+
+router.post('/auth/availability', async (req, res) => {
+  const { username } = req.body || {};
+  const normalizedUsername = username ? String(username).trim().toLowerCase() : null;
+
+  if (!normalizedUsername) {
+    return res.status(400).json({ error: 'username is required' });
+  }
+
+  const db = await readDb();
+  const user = db.users.find((u) => u.username === normalizedUsername) || null;
+
+  if (!user) {
+    return res.json({ exists: false, hasPasskey: false });
+  }
+
+  const hasPasskey = db.passkeys.some((pk) => pk.userId === user.id);
+  return res.json({ exists: true, hasPasskey });
 });
 
 router.post('/auth/verify', async (req, res) => {

@@ -7,6 +7,13 @@ import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
 
+function toUserResponse(user) {
+  return {
+    id: user.id,
+    username: user.username,
+  };
+}
+
 router.post('/signup', async (req, res) => {
   const { username, password } = req.body || {};
 
@@ -43,7 +50,7 @@ router.post('/signup', async (req, res) => {
   const token = signToken(user);
   return res.status(201).json({
     token,
-    user: { id: user.id, username: user.username },
+    user: toUserResponse(user),
     hasPasskey: false,
   });
 });
@@ -73,7 +80,7 @@ router.post('/login', async (req, res) => {
 
   return res.json({
     token,
-    user: { id: user.id, username: user.username },
+    user: toUserResponse(user),
     hasPasskey,
   });
 });
@@ -83,7 +90,7 @@ router.get('/me', requireAuth, async (req, res) => {
   const hasPasskey = db.passkeys.some((pk) => pk.userId === req.user.id);
 
   return res.json({
-    user: { id: req.user.id, username: req.user.username },
+    user: toUserResponse(req.user),
     hasPasskey,
   });
 });
