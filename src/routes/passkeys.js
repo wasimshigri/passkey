@@ -111,7 +111,16 @@ router.post('/register/verify', requireAuth, async (req, res) => {
       return res.status(400).json({ verified: false, error: 'registration not verified' });
     }
 
-    const credentialID = toBase64Url(registrationInfo.credentialID);
+    const credentialIDBytes = registrationInfo.credential?.id
+      ? fromBase64Url(registrationInfo.credential.id)
+      : registrationInfo.credentialID;
+    const credentialPublicKeyBytes = registrationInfo.credential?.publicKey || registrationInfo.credentialPublicKey;
+
+    if (!credentialIDBytes || !credentialPublicKeyBytes) {
+      return res.status(400).json({ verified: false, error: 'registration payload missing credential material' });
+    }
+
+    const credentialID = toBase64Url(credentialIDBytes);
     const alreadyRegistered = db.passkeys.some((pk) => pk.credentialID === credentialID);
     if (alreadyRegistered) {
       return res.status(409).json({ error: 'credential already registered' });
@@ -124,11 +133,11 @@ router.post('/register/verify', requireAuth, async (req, res) => {
         id: uuidv4(),
         userId: req.user.id,
         credentialID,
-        credentialPublicKey: toBase64Url(registrationInfo.credentialPublicKey),
-        counter: registrationInfo.counter,
+        credentialPublicKey: toBase64Url(credentialPublicKeyBytes),
+        counter: registrationInfo.credential?.counter ?? registrationInfo.counter ?? 0,
         credentialDeviceType: registrationInfo.credentialDeviceType,
         credentialBackedUp: registrationInfo.credentialBackedUp,
-        transports: response.response?.transports || [],
+        transports: registrationInfo.credential?.transports || response.response?.transports || [],
         createdAt: new Date().toISOString(),
       });
     });
@@ -238,9 +247,9 @@ router.post('/auth/verify', async (req, res) => {
       expectedChallenge: challenge.challenge,
       expectedOrigin: env.expectedOrigins,
       expectedRPID: env.rpID,
-      authenticator: {
-        credentialID: fromBase64Url(passkey.credentialID),
-        credentialPublicKey: fromBase64Url(passkey.credentialPublicKey),
+      credential: {
+        id: passkey.credentialID,
+        publicKey: fromBase64Url(passkey.credentialPublicKey),
         counter: passkey.counter,
         transports: passkey.transports || [],
       },
