@@ -46,41 +46,48 @@ function cleanupChallenges(db) {
 }
 
 router.post('/register/options', requireAuth, async (req, res) => {
-  const db = await readDb();
-  const userPasskeys = db.passkeys.filter((pk) => pk.userId === req.user.id);
+  try {
+    const db = await readDb();
+    const userPasskeys = db.passkeys.filter((pk) => pk.userId === req.user.id);
+    console.log('[Passkeys] register/options user:', req.user.username, 'existing passkeys:', userPasskeys.length);
 
-  const options = await generateRegistrationOptions({
-    rpName: env.rpName,
-    rpID: env.rpID,
-    userName: req.user.username,
-    userID: textEncoder.encode(req.user.id),
-    attestationType: 'none',
-    authenticatorSelection: {
-      residentKey: 'preferred',
-      userVerification: 'preferred',
-    },
-    excludeCredentials: userPasskeys.map((pk) => ({
-      id: fromBase64Url(pk.credentialID),
-      transports: pk.transports || [],
-    })),
-  });
+    const options = await generateRegistrationOptions({
+      rpName: env.rpName,
+      rpID: env.rpID,
+      userName: req.user.username,
+      userID: textEncoder.encode(req.user.id),
+      attestationType: 'none',
+      authenticatorSelection: {
+        residentKey: 'preferred',
+        userVerification: 'preferred',
+      },
+      excludeCredentials: userPasskeys.map((pk) => ({
+        // v11 expects base64url string ID
+        id: pk.credentialID,
+        transports: pk.transports || [],
+      })),
+    });
 
-  const challengeRecord = createChallengeRecord({
-    userId: req.user.id,
-    username: req.user.username,
-    type: 'register',
-    challenge: options.challenge,
-  });
+    const challengeRecord = createChallengeRecord({
+      userId: req.user.id,
+      username: req.user.username,
+      type: 'register',
+      challenge: options.challenge,
+    });
 
-  await withDb(async (mutableDb) => {
-    cleanupChallenges(mutableDb);
-    mutableDb.challenges.push(challengeRecord);
-  });
+    await withDb(async (mutableDb) => {
+      cleanupChallenges(mutableDb);
+      mutableDb.challenges.push(challengeRecord);
+    });
 
-  return res.json({
-    challengeId: challengeRecord.id,
-    options,
-  });
+    return res.json({
+      challengeId: challengeRecord.id,
+      options,
+    });
+  } catch (error) {
+    console.error('[Passkeys] register/options failed:', error);
+    return res.status(500).json({ error: error.message || 'failed to generate registration options' });
+  }
 });
 
 router.post('/register/verify', requireAuth, async (req, res) => {
@@ -149,52 +156,62 @@ router.post('/register/verify', requireAuth, async (req, res) => {
 });
 
 router.post('/auth/options', async (req, res) => {
-  const { username } = req.body || {};
-  const normalizedUsername = username ? String(username).trim().toLowerCase() : null;
-  const db = await readDb();
+  try {
+    const { username } = req.body || {};
+    const normalizedUsername = username ? String(username).trim().toLowerCase() : null;
+    const db = await readDb();
+    console.log('[Passkeys] auth/options requested for username:', normalizedUsername || '(discoverable)');
 
-  let user = null;
-  let allowCredentials = [];
+    let user = null;
+    let allowCredentials = [];
 
-  if (normalizedUsername) {
-    user = db.users.find((u) => u.username === normalizedUsername) || null;
-    if (!user) {
-      return res.status(404).json({ error: 'user not found' });
+    if (normalizedUsername) {
+      user = db.users.find((u) => u.username === normalizedUsername) || null;
+      if (!user) {
+        console.log('[Passkeys] auth/options user not found:', normalizedUsername);
+        return res.status(404).json({ error: 'user not found' });
+      }
+
+      const userPasskeys = db.passkeys.filter((pk) => pk.userId === user.id);
+      console.log('[Passkeys] auth/options passkeys found:', userPasskeys.length);
+      if (userPasskeys.length === 0) {
+        return res.status(400).json({ error: 'user has no registered passkeys' });
+      }
+
+      allowCredentials = userPasskeys.map((pk) => ({
+        // v11 expects base64url string ID
+        id: pk.credentialID,
+        transports: pk.transports || [],
+      }));
     }
 
-    const userPasskeys = db.passkeys.filter((pk) => pk.userId === user.id);
-    if (userPasskeys.length === 0) {
-      return res.status(400).json({ error: 'user has no registered passkeys' });
-    }
+    const options = await generateAuthenticationOptions({
+      rpID: env.rpID,
+      userVerification: 'preferred',
+      allowCredentials,
+    });
 
-    allowCredentials = userPasskeys.map((pk) => ({
-      id: fromBase64Url(pk.credentialID),
-      transports: pk.transports || [],
-    }));
+    const challengeRecord = createChallengeRecord({
+      userId: user?.id || null,
+      username: user?.username || null,
+      type: 'authenticate',
+      challenge: options.challenge,
+    });
+
+    await withDb(async (mutableDb) => {
+      cleanupChallenges(mutableDb);
+      mutableDb.challenges.push(challengeRecord);
+    });
+
+    console.log('[Passkeys] auth/options success. challengeId:', challengeRecord.id);
+    return res.json({
+      challengeId: challengeRecord.id,
+      options,
+    });
+  } catch (error) {
+    console.error('[Passkeys] auth/options failed:', error);
+    return res.status(500).json({ error: error.message || 'failed to generate authentication options' });
   }
-
-  const options = await generateAuthenticationOptions({
-    rpID: env.rpID,
-    userVerification: 'preferred',
-    allowCredentials,
-  });
-
-  const challengeRecord = createChallengeRecord({
-    userId: user?.id || null,
-    username: user?.username || null,
-    type: 'authenticate',
-    challenge: options.challenge,
-  });
-
-  await withDb(async (mutableDb) => {
-    cleanupChallenges(mutableDb);
-    mutableDb.challenges.push(challengeRecord);
-  });
-
-  return res.json({
-    challengeId: challengeRecord.id,
-    options,
-  });
 });
 
 router.post('/auth/availability', async (req, res) => {
