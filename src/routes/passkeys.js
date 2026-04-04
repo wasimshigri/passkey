@@ -101,7 +101,7 @@ router.post('/register/verify', requireAuth, async (req, res) => {
     const verification = await verifyRegistrationResponse({
       response,
       expectedChallenge: challenge.challenge,
-      expectedOrigin: env.origin,
+      expectedOrigin: env.expectedOrigins,
       expectedRPID: env.rpID,
       requireUserVerification: false,
     });
@@ -236,7 +236,7 @@ router.post('/auth/verify', async (req, res) => {
     const verification = await verifyAuthenticationResponse({
       response,
       expectedChallenge: challenge.challenge,
-      expectedOrigin: env.origin,
+      expectedOrigin: env.expectedOrigins,
       expectedRPID: env.rpID,
       authenticator: {
         credentialID: fromBase64Url(passkey.credentialID),
